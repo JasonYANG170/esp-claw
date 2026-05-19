@@ -1,4 +1,4 @@
-import { ImagePlus, SendHorizontal } from 'lucide-solid';
+import { CircleX, ImagePlus, LoaderCircle, SendHorizontal } from 'lucide-solid';
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type Component } from 'solid-js';
 import type { JSX } from 'solid-js';
 import {
@@ -31,6 +31,12 @@ type MarkedRuntime = {
 
 type DomPurifyRuntime = {
   sanitize: (html: string, config?: Record<string, unknown>) => string;
+};
+
+type LocalWebImMessage = WebImMessage & {
+  localId?: string;
+  sendStatus?: 'pending' | 'sent' | 'failed';
+  files?: string[];
 };
 
 declare global {
@@ -177,8 +183,9 @@ function loadOrCreateChatId(): string {
 export const WebImPage: Component = () => {
   const chatId = loadOrCreateChatId();
   /** In-memory transcript only — lost on refresh. */
-  const [messages, setMessages] = createSignal<WebImMessage[]>([]);
+  const [messages, setMessages] = createSignal<LocalWebImMessage[]>([]);
   let userLocalSeq = 0;
+  let userLocalId = 0;
   const [input, setInput] = createSignal('');
   const [pendingPaths, setPendingPaths] = createSignal<string[]>([]);
   const [error, setError] = createSignal<string | null>(null);
@@ -349,8 +356,42 @@ export const WebImPage: Component = () => {
     inputEl.value = '';
   };
 
+  const makeLocalMessage = (text: string, files: string[]): LocalWebImMessage => {
+    userLocalSeq -= 1;
+    userLocalId += 1;
+    return {
+      seq: userLocalSeq,
+      role: 'user',
+      text,
+      files,
+      localId: `user-${Date.now().toString(36)}-${userLocalId.toString(36)}`,
+      sendStatus: 'pending',
+    };
+  };
+
+  const updateLocalMessageStatus = (
+    localId: string,
+    sendStatus: NonNullable<LocalWebImMessage['sendStatus']>,
+  ) => {
+    setMessages((prev) => prev.map((m) => (m.localId === localId ? { ...m, sendStatus } : m)));
+  };
+
+  const postLocalMessage = async (message: LocalWebImMessage) => {
+    if (!message.localId) return;
+    setSending(true);
+    setError(null);
+    try {
+      await sendWebimMessage(chatId, message.text, message.files ?? []);
+      updateLocalMessageStatus(message.localId, 'sent');
+    } catch (e) {
+      updateLocalMessageStatus(message.localId, 'failed');
+      setError((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  };
+
   const send = async () => {
-    const id = chatId;
     const text = input().trim();
     const files = pendingPaths();
     if (!text && files.length === 0) return;
@@ -359,22 +400,18 @@ export const WebImPage: Component = () => {
       pushToast(t('webimNoBind') as string, 'error', 5000);
       return;
     }
-    setSending(true);
-    setError(null);
-    try {
-      await sendWebimMessage(id, text, files);
-      setInput('');
-      setPendingPaths([]);
-      userLocalSeq -= 1;
-      const useq = userLocalSeq;
-      if (text) {
-        setMessages((prev) => [...prev, { seq: useq, role: 'user', text }]);
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSending(false);
-    }
+    const localMessage = makeLocalMessage(text, files);
+    setMessages((prev) => [...prev, localMessage]);
+    setInput('');
+    setPendingPaths([]);
+    await postLocalMessage(localMessage);
+  };
+
+  const retryMessage = async (message: LocalWebImMessage) => {
+    if (!message.localId || sending() || !wsReady()) return;
+    const retry = { ...message, sendStatus: 'pending' as const };
+    setMessages((prev) => [...prev.filter((m) => m.localId !== message.localId), retry]);
+    await postLocalMessage(retry);
   };
 
   const onInputKeyDown: JSX.EventHandler<HTMLTextAreaElement, KeyboardEvent> = (e) => {
@@ -440,30 +477,56 @@ export const WebImPage: Component = () => {
               {(m) => (
                 <div
                   class={[
-                    'max-w-[min(100%,36rem)] rounded-[var(--radius-md)] px-3 py-2 text-[0.88rem] leading-relaxed',
-                    m.role === 'user'
-                      ? 'self-end bg-[var(--color-accent)]/18 text-[var(--color-text-primary)]'
-                      : 'self-start bg-white/6 text-[var(--color-text-primary)]',
+                    'flex max-w-[min(100%,36rem)] items-start gap-2',
+                    m.role === 'user' ? 'self-end' : 'self-start',
                   ].join(' ')}
                 >
-                  <MarkdownMessage preview={markdownPreview()} text={m.text} />
-                  <Show when={(m.links?.length ?? 0) > 0}>
-                    <ul class="mt-2 space-y-1 list-none m-0 p-0">
-                      <For each={m.links ?? []}>
-                        {(lnk) => (
-                          <li>
-                            <a
-                              href={lnk.url}
-                              download=""
-                              class="text-[var(--color-accent-soft)] hover:underline text-[0.82rem]"
-                            >
-                              {lnk.label || lnk.url}
-                            </a>
-                          </li>
-                        )}
-                      </For>
-                    </ul>
+                  <Show when={m.role === 'user' && m.sendStatus !== 'sent'}>
+                    <span class="mt-2 flex h-5 w-5 shrink-0 items-center justify-center">
+                      <Show when={m.sendStatus === 'pending'}>
+                        <LoaderCircle class="h-4 w-4 animate-spin text-[var(--color-text-muted)]" />
+                      </Show>
+                      <Show when={m.sendStatus === 'failed'}>
+                        <button
+                          type="button"
+                          class="inline-flex h-5 w-5 items-center justify-center rounded-full text-[rgb(248,113,113)] transition hover:bg-[rgba(248,113,113,0.12)] hover:text-[rgb(252,165,165)] disabled:opacity-60"
+                          title={t('webimRetrySend') as string}
+                          aria-label={t('webimRetrySend') as string}
+                          disabled={sending() || !wsReady()}
+                          onClick={() => void retryMessage(m)}
+                        >
+                          <CircleX class="h-4 w-4" />
+                        </button>
+                      </Show>
+                    </span>
                   </Show>
+                  <div
+                    class={[
+                      'min-w-0 rounded-[var(--radius-md)] px-3 py-2 text-[0.88rem] leading-relaxed',
+                      m.role === 'user'
+                        ? 'bg-[var(--color-accent)]/18 text-[var(--color-text-primary)]'
+                        : 'bg-white/6 text-[var(--color-text-primary)]',
+                    ].join(' ')}
+                  >
+                    <MarkdownMessage preview={markdownPreview()} text={m.text} />
+                    <Show when={(m.links?.length ?? 0) > 0}>
+                      <ul class="mt-2 space-y-1 list-none m-0 p-0">
+                        <For each={m.links ?? []}>
+                          {(lnk) => (
+                            <li>
+                              <a
+                                href={lnk.url}
+                                download=""
+                                class="text-[var(--color-accent-soft)] hover:underline text-[0.82rem]"
+                              >
+                                {lnk.label || lnk.url}
+                              </a>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </Show>
+                  </div>
                 </div>
               )}
             </For>

@@ -42,6 +42,7 @@ export const zhCn: Dict = {
   webimMarkdownPreview: 'Markdown 预览',
   webimMarkdownPreviewLoading: '正在加载 Markdown…',
   webimMarkdownPreviewLoadFailed: '无法加载 Markdown 预览库。',
+  webimRetrySend: '重新发送',
 
   unsavedIndicator: '未保存',
   unsavedConfirmLeave: '当前页面有未保存的修改，是否放弃修改并切换？',

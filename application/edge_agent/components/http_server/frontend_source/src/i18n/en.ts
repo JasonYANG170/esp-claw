@@ -42,6 +42,7 @@ export const en = {
   webimMarkdownPreview: 'Markdown preview',
   webimMarkdownPreviewLoading: 'Loading Markdown…',
   webimMarkdownPreviewLoadFailed: 'Could not load Markdown preview libraries.',
+  webimRetrySend: 'Retry sending',
 
   unsavedIndicator: 'Unsaved',
   unsavedConfirmLeave:

@@ -165,11 +165,13 @@ static esp_err_t init_memory(const app_claw_config_t *config,
 static esp_err_t init_skills(const app_claw_storage_paths_t *paths)
 {
     ESP_RETURN_ON_ERROR(claw_skill_init(&(claw_skill_config_t) {
-                            .skills_root_dir = paths->skills_root_dir,
                             .session_state_root_dir = paths->memory_session_root,
                             .max_file_bytes = 20 * 1024,
                         }),
                         TAG, "Failed to init claw_skill");
+    /* Register scan roots in priority order*/
+    ESP_RETURN_ON_ERROR(claw_skill_add_directory(paths->system_skills_root_dir), TAG, "Failed to add system skills directory");
+    ESP_RETURN_ON_ERROR(claw_skill_add_directory(paths->skills_root_dir), TAG, "Failed to add skills directory");
     return ESP_OK;
 }
 

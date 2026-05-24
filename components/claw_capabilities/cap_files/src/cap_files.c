@@ -67,6 +67,14 @@ static bool cap_files_text_contains_ci(const char *haystack, const char *needle)
     return false;
 }
 
+/* Names beginning with '.' are treated as hidden (Unix convention). Seed trees
+ * such as /system/.recovery use this prefix to stay out of list_dir output so
+ * the LLM does not see or recurse into them. Access by explicit path still works. */
+static bool cap_files_is_hidden_name(const char *name)
+{
+    return name && name[0] == '.';
+}
+
 static bool cap_files_path_is_valid(const char *path)
 {
     size_t base_len;
@@ -209,6 +217,11 @@ static esp_err_t cap_files_list_recursive(const char *dir_path,
         struct stat st = {0};
 
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        /* Hide dot-prefixed entries (files and dirs); also stops recursion into them. */
+        if (cap_files_is_hidden_name(entry->d_name)) {
             continue;
         }
 

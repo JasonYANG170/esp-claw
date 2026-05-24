@@ -57,6 +57,7 @@ typedef struct {
     char memory_session_root[APP_CLAW_PATH_LEN];
     char memory_root_dir[APP_CLAW_PATH_LEN];
     char skills_root_dir[APP_CLAW_PATH_LEN];
+    char system_skills_root_dir[APP_CLAW_PATH_LEN];
     char lua_root_dir[APP_CLAW_PATH_LEN];
     char router_rules_path[APP_CLAW_FILE_PATH_LEN];
     char scheduler_rules_path[APP_CLAW_FILE_PATH_LEN];
